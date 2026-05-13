@@ -75,7 +75,7 @@ h1, h2, h3 {
 
 /* Contract preview box */
 .contract-preview {
-    background: #fafafa;
+    background: #fafafa !important;
     border: 1px solid #ddd;
     border-radius: 8px;
     padding: 1.5rem;
@@ -85,6 +85,7 @@ h1, h2, h3 {
     white-space: pre-wrap;
     max-height: 420px;
     overflow-y: auto;
+    color: #1a1a1a !important;
 }
 
 /* Tier badges */
@@ -413,7 +414,13 @@ with tabs[1]:
                 filled = fill_template(template["template_body"], selected_customer, selected_equip, draft_contract)
 
                 st.markdown("<div class='section-title'>Contract Preview</div>", unsafe_allow_html=True)
-                st.markdown(f"<div class='contract-preview'>{filled}</div>", unsafe_allow_html=True)
+                st.text_area(
+                    "Contract Document",
+                    value=filled,
+                    height=400,
+                    disabled=True,
+                    label_visibility="collapsed"
+                )
 
                 col_a, col_b = st.columns([1, 3])
                 with col_a:
@@ -489,7 +496,13 @@ with tabs[2]:
 
             if template:
                 filled = fill_template(template.get("template_body", ""), customer, equip, this_version)
-                st.markdown(f"<div class='contract-preview'>{filled}</div>", unsafe_allow_html=True)
+                st.text_area(
+                    "Contract Document",
+                    value=filled,
+                    height=400,
+                    disabled=True,
+                    label_visibility="collapsed"
+                )
 
         st.markdown("---")
         st.markdown(f"**Customer:** {selected_c['customer_name']} &nbsp;|&nbsp; **Contact:** {selected_c['contact_person']} &nbsp;|&nbsp; **Email:** {selected_c['email']}")
