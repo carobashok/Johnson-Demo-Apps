@@ -414,12 +414,7 @@ with tabs[1]:
                 filled = fill_template(template["template_body"], selected_customer, selected_equip, draft_contract)
 
                 st.markdown("<div class='section-title'>Contract Preview</div>", unsafe_allow_html=True)
-                st.text_area(
-                    "Contract Document",
-                    value=filled,
-                    height=400,
-                    disabled=True
-                )
+                st.code(filled, language=None)
 
                 col_a, col_b = st.columns([1, 3])
                 with col_a:
@@ -495,12 +490,7 @@ with tabs[2]:
 
             if template:
                 filled = fill_template(template.get("template_body", ""), customer, equip, this_version)
-                st.text_area(
-                    "Contract Document",
-                    value=filled,
-                    height=400,
-                    disabled=True
-                )
+                st.code(filled, language=None)
 
         st.markdown("---")
         st.markdown(f"**Customer:** {selected_c['customer_name']} &nbsp;|&nbsp; **Contact:** {selected_c['contact_person']} &nbsp;|&nbsp; **Email:** {selected_c['email']}")
