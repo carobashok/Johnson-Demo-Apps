@@ -418,8 +418,7 @@ with tabs[1]:
                     "Contract Document",
                     value=filled,
                     height=400,
-                    disabled=True,
-                    label_visibility="collapsed"
+                    disabled=True
                 )
 
                 col_a, col_b = st.columns([1, 3])
@@ -500,8 +499,7 @@ with tabs[2]:
                     "Contract Document",
                     value=filled,
                     height=400,
-                    disabled=True,
-                    label_visibility="collapsed"
+                    disabled=True
                 )
 
         st.markdown("---")
