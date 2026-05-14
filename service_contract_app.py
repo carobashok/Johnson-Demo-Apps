@@ -251,7 +251,8 @@ def get_docusign_token():
             "assertion":  jwt_token
         }
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        raise Exception(f"Token error {resp.status_code}: {resp.text}")
     return resp.json()["access_token"]
 
 
