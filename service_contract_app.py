@@ -7,7 +7,7 @@ import smtplib
 import base64
 import time
 import requests
-import jwt as pyjwt
+import json
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -200,32 +200,55 @@ Carob Technologies
 # DOCUSIGN INTEGRATION
 # ─────────────────────────────────────────────
 def get_docusign_token():
-    """Get JWT access token from DocuSign"""
-    import jwt as pyjwt
-    import time
-    import requests
+    """Get JWT access token from DocuSign using cryptography library directly"""
+    import json
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+    from cryptography.hazmat.backends import default_backend
 
     cfg             = st.secrets["docusign"]
     integration_key = cfg["integration_key"]
     user_id         = cfg["user_id"]
-    private_key     = cfg["private_key"]
+    private_key_str = cfg["private_key"]
 
     now = int(time.time())
+
+    # Build JWT header and payload
+    header  = {"alg": "RS256", "typ": "JWT"}
     payload = {
-        "iss": integration_key,
-        "sub": user_id,
-        "aud": "account-d.docusign.com",
-        "iat": now,
-        "exp": now + 3600,
+        "iss":   integration_key,
+        "sub":   user_id,
+        "aud":   "account-d.docusign.com",
+        "iat":   now,
+        "exp":   now + 3600,
         "scope": "signature impersonation"
     }
 
-    token = pyjwt.encode(payload, private_key, algorithm="RS256")
-    resp  = requests.post(
+    def b64url(data):
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
+
+    header_b64      = b64url(json.dumps(header,  separators=(",", ":")))
+    payload_b64     = b64url(json.dumps(payload, separators=(",", ":")))
+    signing_input   = f"{header_b64}.{payload_b64}".encode("utf-8")
+
+    # Load RSA private key and sign
+    private_key_obj = serialization.load_pem_private_key(
+        private_key_str.encode("utf-8"),
+        password=None,
+        backend=default_backend()
+    )
+    signature     = private_key_obj.sign(signing_input, asym_padding.PKCS1v15(), hashes.SHA256())
+    signature_b64 = b64url(signature)
+
+    jwt_token = f"{header_b64}.{payload_b64}.{signature_b64}"
+
+    resp = requests.post(
         "https://account-d.docusign.com/oauth/token",
         data={
             "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-            "assertion":  token
+            "assertion":  jwt_token
         }
     )
     resp.raise_for_status()
