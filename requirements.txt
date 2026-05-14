@@ -24,6 +24,9 @@ duckdb
 supabase
 sqlalchemy
 pikepdf>=8.0.0
+PyJWT
+cryptography
+requests
 
 # Google
 gspread==6.1.2
