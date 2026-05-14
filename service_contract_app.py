@@ -78,7 +78,7 @@ def send_contract_email(customer, contract, contract_body):
         sender_name = cfg.get("sender_name", "Carob Technologies")
         app_url     = cfg.get("app_url", "").rstrip("/")
 
-        review_link = f"{app_url}/?contract={contract['contract_id']}&version={contract['version']}"
+        review_link = f"{app_url}/review?contract={contract['contract_id']}&version={contract['version']}"
 
         html = f"""
         <html><body style="font-family:Arial,sans-serif;color:#222;max-width:700px;margin:auto;">
