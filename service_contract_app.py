@@ -3,6 +3,9 @@ from supabase import create_client
 import pandas as pd
 from datetime import date, datetime
 import re
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -20,14 +23,9 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif;
-}
-h1, h2, h3 {
-    font-family: 'DM Serif Display', serif;
-}
+html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
+h1, h2, h3 { font-family: 'DM Serif Display', serif; }
 
-/* Header */
 .app-header {
     background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
     padding: 1.5rem 2rem;
@@ -37,108 +35,22 @@ h1, h2, h3 {
     justify-content: space-between;
     align-items: center;
 }
-.app-header h1 {
-    color: #ffffff;
-    margin: 0;
-    font-size: 1.6rem;
-    letter-spacing: 0.5px;
-}
-.app-header span {
-    color: #a8d8ea;
-    font-size: 0.85rem;
-}
+.app-header h1 { color: #ffffff; margin: 0; font-size: 1.6rem; letter-spacing: 0.5px; }
+.app-header span { color: #a8d8ea; font-size: 0.85rem; }
 
-/* Status badges */
-.badge {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-}
+.badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.5px; }
 .badge-draft    { background: #e8e8e8; color: #555; }
 .badge-pending  { background: #fff3cd; color: #856404; }
 .badge-signed   { background: #d4edda; color: #155724; }
 .badge-declined { background: #f8d7da; color: #721c24; }
 
-/* Contract card */
-.contract-card {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.6rem;
-    border-left: 4px solid #2c5364;
-}
-.contract-card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
-
-/* Contract preview box */
-.contract-preview {
-    background: #fafafa !important;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    padding: 1.5rem;
-    font-family: 'Courier New', monospace;
-    font-size: 0.82rem;
-    line-height: 1.7;
-    white-space: pre-wrap;
-    max-height: 420px;
-    overflow-y: auto;
-    color: #1a1a1a !important;
-}
-
-/* Tier badges */
 .tier-platinum { background: #e8e0f7; color: #4a1e8a; border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; font-weight: 600; }
 .tier-gold     { background: #fff4d6; color: #92650a; border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; font-weight: 600; }
 .tier-silver   { background: #eaeaea; color: #444;    border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; font-weight: 600; }
 
-/* Section headers */
-.section-title {
-    font-family: 'DM Serif Display', serif;
-    font-size: 1.2rem;
-    color: #2c5364;
-    border-bottom: 2px solid #e5e7eb;
-    padding-bottom: 0.4rem;
-    margin-bottom: 1rem;
-}
+.section-title { font-family: 'DM Serif Display', serif; font-size: 1.2rem; color: #2c5364; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.4rem; margin-bottom: 1rem; }
 
-/* Metric cards */
-.metric-row {
-    display: flex;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-}
-.metric-card {
-    flex: 1;
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 1rem;
-    text-align: center;
-}
-.metric-card .num { font-size: 2rem; font-weight: 700; color: #2c5364; }
-.metric-card .lbl { font-size: 0.78rem; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
-
-/* Info box */
-.info-box {
-    background: #eef6fb;
-    border-left: 4px solid #2c5364;
-    padding: 0.8rem 1rem;
-    border-radius: 0 8px 8px 0;
-    margin-bottom: 1rem;
-    font-size: 0.88rem;
-    color: #2c5364;
-}
-.declined-box {
-    background: #fff5f5;
-    border-left: 4px solid #dc3545;
-    padding: 0.8rem 1rem;
-    border-radius: 0 8px 8px 0;
-    margin-bottom: 1rem;
-    font-size: 0.88rem;
-    color: #721c24;
-}
+.info-box { background: #eef6fb; border-left: 4px solid #2c5364; padding: 0.8rem 1rem; border-radius: 0 8px 8px 0; margin-bottom: 1rem; font-size: 0.88rem; color: #2c5364; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -154,11 +66,138 @@ def get_supabase():
 supabase = get_supabase()
 
 # ─────────────────────────────────────────────
+# EMAIL FUNCTION
+# ─────────────────────────────────────────────
+def send_contract_email(customer, contract, contract_body):
+    try:
+        cfg         = st.secrets["email"]
+        smtp_host   = cfg["smtp_host"]
+        smtp_port   = int(cfg["smtp_port"])
+        smtp_user   = cfg["smtp_user"]
+        smtp_pass   = cfg["smtp_password"]
+        sender_name = cfg.get("sender_name", "Carob Technologies")
+        app_url     = cfg.get("app_url", "").rstrip("/")
+
+        review_link = f"{app_url}/?contract={contract['contract_id']}&version={contract['version']}"
+
+        html = f"""
+        <html><body style="font-family:Arial,sans-serif;color:#222;max-width:700px;margin:auto;">
+
+        <div style="background:linear-gradient(135deg,#0f2027,#2c5364);padding:24px 32px;border-radius:10px 10px 0 0;">
+            <h2 style="color:#fff;margin:0;">Service Contract for Review &amp; Signature</h2>
+            <p style="color:#a8d8ea;margin:6px 0 0;">Carob Technologies — AMC Division</p>
+        </div>
+
+        <div style="border:1px solid #ddd;border-top:none;border-radius:0 0 10px 10px;padding:28px 32px;">
+            <p>Dear <strong>{customer['contact_person']}</strong>,</p>
+            <p>Please find your <strong>{contract['contract_tier']} AMC Contract</strong>
+               for <strong>{contract['equipment_type']}</strong> equipment below.
+               Kindly review and click Approve or Decline at the bottom.</p>
+
+            <table style="width:100%;border-collapse:collapse;margin:20px 0;font-size:0.9rem;">
+                <tr style="background:#f0f4f8;">
+                    <td style="padding:10px 14px;font-weight:600;border:1px solid #ddd;width:35%;">Contract ID</td>
+                    <td style="padding:10px 14px;border:1px solid #ddd;">{contract['contract_id']} — Version {contract['version']}</td>
+                </tr>
+                <tr>
+                    <td style="padding:10px 14px;font-weight:600;border:1px solid #ddd;">Equipment Type</td>
+                    <td style="padding:10px 14px;border:1px solid #ddd;">{contract['equipment_type']}</td>
+                </tr>
+                <tr style="background:#f0f4f8;">
+                    <td style="padding:10px 14px;font-weight:600;border:1px solid #ddd;">Contract Tier</td>
+                    <td style="padding:10px 14px;border:1px solid #ddd;">{contract['contract_tier']}</td>
+                </tr>
+                <tr>
+                    <td style="padding:10px 14px;font-weight:600;border:1px solid #ddd;">Contract Value</td>
+                    <td style="padding:10px 14px;border:1px solid #ddd;">Rs {float(contract['contract_value']):,.2f} per annum</td>
+                </tr>
+                <tr style="background:#f0f4f8;">
+                    <td style="padding:10px 14px;font-weight:600;border:1px solid #ddd;">Contract Period</td>
+                    <td style="padding:10px 14px;border:1px solid #ddd;">{contract['start_date']} to {contract['end_date']}</td>
+                </tr>
+                <tr>
+                    <td style="padding:10px 14px;font-weight:600;border:1px solid #ddd;">Payment Terms</td>
+                    <td style="padding:10px 14px;border:1px solid #ddd;">{contract['payment_terms']}</td>
+                </tr>
+            </table>
+
+            <h3 style="color:#2c5364;border-bottom:2px solid #e5e7eb;padding-bottom:8px;">Contract Document</h3>
+            <div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px;padding:20px;
+                        font-family:'Courier New',monospace;font-size:0.82rem;line-height:1.8;
+                        white-space:pre-wrap;color:#1a1a1a;">
+{contract_body}
+            </div>
+
+            <div style="text-align:center;margin:32px 0 16px;">
+                <a href="{review_link}&action=approve"
+                   style="background:#28a745;color:#fff;padding:14px 32px;border-radius:6px;
+                          text-decoration:none;font-weight:700;font-size:1rem;margin-right:16px;">
+                   Approve &amp; Sign
+                </a>
+                <a href="{review_link}&action=decline"
+                   style="background:#dc3545;color:#fff;padding:14px 32px;border-radius:6px;
+                          text-decoration:none;font-weight:700;font-size:1rem;">
+                   Decline with Comments
+                </a>
+            </div>
+
+            <p style="font-size:0.82rem;color:#888;text-align:center;">
+                Clicking a button above opens the review portal to confirm your decision.<br>
+                For queries, contact us at {smtp_user}.
+            </p>
+
+            <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+            <p style="font-size:0.8rem;color:#aaa;text-align:center;">
+                This is an automated email from Carob Technologies Service Contract Manager.
+            </p>
+        </div>
+        </body></html>
+        """
+
+        plain = f"""Dear {customer['contact_person']},
+
+Please review your {contract['contract_tier']} AMC Contract for {contract['equipment_type']}.
+
+Contract ID   : {contract['contract_id']} v{contract['version']}
+Contract Value: Rs {float(contract['contract_value']):,.2f} per annum
+Period        : {contract['start_date']} to {contract['end_date']}
+Payment Terms : {contract['payment_terms']}
+
+CONTRACT DOCUMENT:
+{contract_body}
+
+To review and sign, visit:
+{review_link}
+
+Regards,
+Carob Technologies
+"""
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"AMC Contract for Review — {contract['contract_id']} ({contract['contract_tier']} {contract['equipment_type']})"
+        msg["From"]    = f"{sender_name} <{smtp_user}>"
+        msg["To"]      = customer["email"]
+
+        msg.attach(MIMEText(plain, "plain"))
+        msg.attach(MIMEText(html,  "html"))
+
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_user, customer["email"], msg.as_string())
+
+        return True, None
+
+    except Exception as e:
+        return False, str(e)
+
+# ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
 def generate_contract_id():
     year = date.today().year
-    res = supabase.table("contracts").select("contract_id").execute()
+    res  = supabase.table("contracts").select("contract_id").execute()
     existing = [r["contract_id"] for r in res.data] if res.data else []
     nums = []
     for cid in existing:
@@ -171,22 +210,22 @@ def generate_contract_id():
 def fill_template(template_body, customer, equipment, contract):
     placeholders = {
         "{{company_name}}":      "Carob Technologies",
-        "{{customer_name}}":     customer["customer_name"],
-        "{{contact_person}}":    customer["contact_person"],
-        "{{customer_address}}":  customer["address"],
-        "{{customer_city}}":     customer["city"],
-        "{{customer_pincode}}":  customer["pincode"],
-        "{{equipment_type}}":    equipment["equipment_type"],
-        "{{equipment_make}}":    equipment["make"],
-        "{{equipment_model}}":   equipment["model"],
+        "{{customer_name}}":     customer.get("customer_name", ""),
+        "{{contact_person}}":    customer.get("contact_person", ""),
+        "{{customer_address}}":  customer.get("address", ""),
+        "{{customer_city}}":     customer.get("city", ""),
+        "{{customer_pincode}}":  customer.get("pincode", ""),
+        "{{equipment_type}}":    equipment.get("equipment_type", ""),
+        "{{equipment_make}}":    equipment.get("make", ""),
+        "{{equipment_model}}":   equipment.get("model", ""),
         "{{serial_number}}":     equipment.get("serial_number", "N/A"),
-        "{{number_of_units}}":   str(equipment["number_of_units"]),
-        "{{site_location}}":     equipment["site_location"],
-        "{{installation_date}}": str(equipment["installation_date"]),
+        "{{number_of_units}}":   str(equipment.get("number_of_units", "")),
+        "{{site_location}}":     equipment.get("site_location", ""),
+        "{{installation_date}}": str(equipment.get("installation_date", "")),
         "{{start_date}}":        str(contract.get("start_date", "")),
         "{{end_date}}":          str(contract.get("end_date", "")),
-        "{{contract_value}}":    f"{contract.get('contract_value', 0):,.2f}",
-        "{{payment_terms}}":     contract.get("payment_terms", ""),
+        "{{contract_value}}":    f"{float(contract.get('contract_value', 0)):,.2f}",
+        "{{payment_terms}}":     str(contract.get("payment_terms", "")),
         "{{signed_date}}":       "_______________",
     }
     body = template_body
@@ -204,15 +243,13 @@ def log_action(contract_id, version, action, action_by="Internal", notes=""):
     }).execute()
 
 def badge_html(status):
-    cls = f"badge-{status.lower()}"
-    return f'<span class="badge {cls}">{status.upper()}</span>'
+    return f'<span class="badge badge-{status.lower()}">{status.upper()}</span>'
 
 def tier_html(tier):
-    cls = f"tier-{tier.lower()}"
-    return f'<span class="{cls}">{tier}</span>'
+    return f'<span class="tier-{tier.lower()}">{tier}</span>'
 
 # ─────────────────────────────────────────────
-# LOAD DATA
+# DATA LOADERS
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=30)
 def load_customers():
@@ -254,7 +291,7 @@ def load_contract_versions(contract_id):
 # ─────────────────────────────────────────────
 st.markdown("""
 <div class="app-header">
-    <h1>📋 Service Contract Manager</h1>
+    <h1>Service Contract Manager</h1>
     <span>Carob Technologies &nbsp;|&nbsp; Lift & Escalator AMC</span>
 </div>
 """, unsafe_allow_html=True)
@@ -262,7 +299,7 @@ st.markdown("""
 # ─────────────────────────────────────────────
 # NAVIGATION
 # ─────────────────────────────────────────────
-tabs = st.tabs(["📊 Dashboard", "➕ New Contract", "✍️ Customer Review", "📜 Audit Trail"])
+tabs = st.tabs(["Dashboard", "New Contract", "Customer Review", "Audit Trail"])
 
 # ═══════════════════════════════════════════════════════════
 # TAB 1: DASHBOARD
@@ -270,7 +307,6 @@ tabs = st.tabs(["📊 Dashboard", "➕ New Contract", "✍️ Customer Review", 
 with tabs[0]:
     contracts = load_contracts()
 
-    # Metrics
     total    = len(set(c["contract_id"] for c in contracts))
     pending  = sum(1 for c in contracts if c["status"] == "Pending")
     signed   = sum(1 for c in contracts if c["status"] == "Signed")
@@ -279,14 +315,13 @@ with tabs[0]:
 
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Total Contracts", total)
-    c2.metric("Draft",    draft,    delta=None)
-    c3.metric("Pending",  pending,  delta=None)
-    c4.metric("Signed",   signed,   delta=None)
-    c5.metric("Declined", declined, delta=None)
+    c2.metric("Draft",    draft)
+    c3.metric("Pending",  pending)
+    c4.metric("Signed",   signed)
+    c5.metric("Declined", declined)
 
     st.markdown("<div class='section-title'>All Contracts</div>", unsafe_allow_html=True)
 
-    # Filters
     f1, f2, f3 = st.columns(3)
     with f1:
         status_filter = st.selectbox("Filter by Status", ["All", "Draft", "Pending", "Signed", "Declined"])
@@ -304,20 +339,20 @@ with tabs[0]:
         filtered = [c for c in filtered if c["contract_tier"] == tier_filter]
 
     if not filtered:
-        st.info("No contracts found. Create one from the 'New Contract' tab.")
+        st.info("No contracts found. Create one from the New Contract tab.")
     else:
         for c in filtered:
             with st.container():
-                col1, col2, col3, col4, col5 = st.columns([2, 2, 1.5, 1.5, 1])
+                col1, col2, col3, col4, col5 = st.columns([2, 2, 1.5, 1.5, 1.2])
                 with col1:
                     st.markdown(f"**{c['contract_id']}** &nbsp; v{c['version']}", unsafe_allow_html=True)
                     st.caption(f"{c['customer_name']} — {c['contact_person']}")
                 with col2:
                     st.markdown(f"{c['equipment_type']} &nbsp; {tier_html(c['contract_tier'])}", unsafe_allow_html=True)
-                    st.caption(f"{c['equipment']}")
+                    st.caption(str(c.get("equipment", "")))
                 with col3:
-                    st.markdown(f"₹ {c['contract_value']:,.0f}", unsafe_allow_html=True)
-                    st.caption(f"{c['start_date']} → {c['end_date']}")
+                    st.markdown(f"Rs {float(c['contract_value']):,.0f}", unsafe_allow_html=True)
+                    st.caption(f"{c['start_date']} to {c['end_date']}")
                 with col4:
                     st.markdown(badge_html(c["status"]), unsafe_allow_html=True)
                     if c.get("signed_at"):
@@ -326,20 +361,39 @@ with tabs[0]:
                         st.caption(f"Sent: {str(c['sent_at'])[:10]}")
                 with col5:
                     if c["status"] == "Draft":
-                        if st.button("Send →", key=f"send_{c['contract_id']}_{c['version']}"):
-                            supabase.table("contracts").update({
-                                "status": "Pending",
-                                "sent_at": datetime.now().isoformat()
-                            }).eq("contract_id", c["contract_id"]).eq("version", c["version"]).execute()
-                            log_action(c["contract_id"], c["version"], "Sent", "Internal", "Dispatched for e-signature")
-                            st.cache_data.clear()
-                            st.success(f"Contract {c['contract_id']} sent for signature!")
-                            st.rerun()
+                        if st.button("Send Email", key=f"send_{c['contract_id']}_{c['version']}"):
+                            versions_data = load_contract_versions(c["contract_id"])
+                            this_v  = next((v for v in versions_data if v["version"] == c["version"]), None)
+                            custs   = load_customers()
+                            cust    = next((cu for cu in custs if cu["customer_id"] == this_v["customer_id"]), {})
+                            eq_list = load_equipment(this_v["customer_id"])
+                            eq      = next((e for e in eq_list if e["equipment_id"] == this_v["equipment_id"]), {})
+                            tmpls   = load_templates(this_v["equipment_type"], this_v["contract_tier"])
+                            tmpl    = tmpls[0] if tmpls else {}
+
+                            if tmpl and cust:
+                                filled = fill_template(tmpl["template_body"], cust, eq, this_v)
+                                ok, err = send_contract_email(cust, this_v, filled)
+                                if ok:
+                                    supabase.table("contracts").update({
+                                        "status":  "Pending",
+                                        "sent_at": datetime.now().isoformat()
+                                    }).eq("contract_id", c["contract_id"]).eq("version", c["version"]).execute()
+                                    log_action(c["contract_id"], c["version"], "Sent", "Internal",
+                                        f"Email sent to {cust['email']}")
+                                    st.cache_data.clear()
+                                    st.success(f"Email sent to {cust['email']}!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Email failed: {err}")
+                            else:
+                                st.error("Could not load template or customer data.")
+
                     elif c["status"] == "Declined":
                         if st.button("Revise", key=f"rev_{c['contract_id']}_{c['version']}"):
                             st.session_state["revise_contract_id"] = c["contract_id"]
                             st.session_state["revise_version"]     = c["version"]
-                            st.info(f"Go to 'New Contract' tab to revise {c['contract_id']}")
+                            st.info(f"Go to New Contract tab to revise {c['contract_id']}")
                 st.divider()
 
 # ═══════════════════════════════════════════════════════════
@@ -349,7 +403,7 @@ with tabs[1]:
     is_revision = "revise_contract_id" in st.session_state
     if is_revision:
         st.markdown(f"""<div class='info-box'>
-            ✏️ Revising contract <strong>{st.session_state['revise_contract_id']}</strong> — 
+            Revising contract <strong>{st.session_state['revise_contract_id']}</strong> —
             v{st.session_state['revise_version']} was declined. A new version will be created.
         </div>""", unsafe_allow_html=True)
 
@@ -360,11 +414,10 @@ with tabs[1]:
         st.warning("No customers found. Please check your database.")
     else:
         customer_map = {c["customer_name"]: c for c in customers}
-        selected_customer_name = st.selectbox("Select Customer", list(customer_map.keys()))
-        selected_customer = customer_map[selected_customer_name]
+        sel_cust_name = st.selectbox("Select Customer", list(customer_map.keys()))
+        sel_customer  = customer_map[sel_cust_name]
 
-        # Load equipment for this customer
-        equip_list = load_equipment(selected_customer["customer_id"])
+        equip_list = load_equipment(sel_customer["customer_id"])
         if not equip_list:
             st.warning("No equipment found for this customer.")
         else:
@@ -372,8 +425,8 @@ with tabs[1]:
                 f"{e['equipment_type']} — {e['make']} {e['model']} ({e['site_location']})": e
                 for e in equip_list
             }
-            selected_equip_label = st.selectbox("Select Equipment", list(equip_map.keys()))
-            selected_equip = equip_map[selected_equip_label]
+            sel_equip_label = st.selectbox("Select Equipment", list(equip_map.keys()))
+            sel_equip = equip_map[sel_equip_label]
 
             col1, col2 = st.columns(2)
             with col1:
@@ -391,115 +444,118 @@ with tabs[1]:
                 end_date = st.date_input("Contract End Date",
                     value=date(date.today().year + 1, date.today().month, date.today().day))
 
-            contract_value = st.number_input("Contract Value (₹ per annum)", min_value=1000.0, step=500.0, value=50000.0)
+            contract_value = st.number_input("Contract Value (Rs per annum)",
+                min_value=1000.0, step=500.0, value=50000.0)
 
+            changed_fields = ""
             if is_revision:
                 changed_fields = st.text_area("What changed in this revision?",
-                    placeholder="e.g. Contract value revised from ₹50,000 to ₹45,000; Payment terms changed to quarterly")
-            else:
-                changed_fields = ""
+                    placeholder="e.g. Contract value revised; Payment terms changed")
 
-            # Load template
-            templates = load_templates(selected_equip["equipment_type"], contract_tier)
+            templates = load_templates(sel_equip["equipment_type"], contract_tier)
             if not templates:
-                st.error(f"No template found for {selected_equip['equipment_type']} — {contract_tier}. Please check the contract_templates table.")
+                st.error(f"No template found for {sel_equip['equipment_type']} — {contract_tier}.")
             else:
                 template = templates[0]
                 draft_contract = {
-                    "start_date":      start_date,
-                    "end_date":        end_date,
-                    "contract_value":  contract_value,
-                    "payment_terms":   payment_terms,
+                    "start_date":     start_date,
+                    "end_date":       end_date,
+                    "contract_value": contract_value,
+                    "payment_terms":  payment_terms,
                 }
-                filled = fill_template(template["template_body"], selected_customer, selected_equip, draft_contract)
+                filled = fill_template(template["template_body"], sel_customer, sel_equip, draft_contract)
 
                 st.markdown("<div class='section-title'>Contract Preview</div>", unsafe_allow_html=True)
                 st.code(filled, language=None)
 
-                col_a, col_b = st.columns([1, 3])
-                with col_a:
-                    if st.button("💾 Save as Draft", use_container_width=True):
-                        if is_revision:
-                            prev_versions = load_contract_versions(st.session_state["revise_contract_id"])
-                            new_version   = max(v["version"] for v in prev_versions) + 1
-                            contract_id   = st.session_state["revise_contract_id"]
-                        else:
-                            contract_id = generate_contract_id()
-                            new_version = 1
+                if st.button("Save as Draft"):
+                    if is_revision:
+                        prev_vers   = load_contract_versions(st.session_state["revise_contract_id"])
+                        new_version = max(v["version"] for v in prev_vers) + 1
+                        contract_id = st.session_state["revise_contract_id"]
+                    else:
+                        contract_id = generate_contract_id()
+                        new_version = 1
 
-                        supabase.table("contracts").insert({
-                            "contract_id":     contract_id,
-                            "version":         new_version,
-                            "customer_id":     selected_customer["customer_id"],
-                            "equipment_id":    selected_equip["equipment_id"],
-                            "template_id":     template["template_id"],
-                            "equipment_type":  selected_equip["equipment_type"],
-                            "contract_tier":   contract_tier,
-                            "contract_value":  contract_value,
-                            "start_date":      str(start_date),
-                            "end_date":        str(end_date),
-                            "payment_terms":   payment_terms,
-                            "status":          "Draft",
-                            "changed_fields":  changed_fields,
-                        }).execute()
+                    supabase.table("contracts").insert({
+                        "contract_id":    contract_id,
+                        "version":        new_version,
+                        "customer_id":    sel_customer["customer_id"],
+                        "equipment_id":   sel_equip["equipment_id"],
+                        "template_id":    template["template_id"],
+                        "equipment_type": sel_equip["equipment_type"],
+                        "contract_tier":  contract_tier,
+                        "contract_value": contract_value,
+                        "start_date":     str(start_date),
+                        "end_date":       str(end_date),
+                        "payment_terms":  payment_terms,
+                        "status":         "Draft",
+                        "changed_fields": changed_fields,
+                    }).execute()
 
-                        log_action(contract_id, new_version, "Created", "Internal",
-                            f"Draft created — {selected_equip['equipment_type']} {contract_tier}")
-                        st.cache_data.clear()
+                    log_action(contract_id, new_version, "Created", "Internal",
+                        f"Draft — {sel_equip['equipment_type']} {contract_tier}")
+                    st.cache_data.clear()
 
-                        if is_revision:
-                            del st.session_state["revise_contract_id"]
-                            del st.session_state["revise_version"]
+                    if is_revision:
+                        del st.session_state["revise_contract_id"]
+                        del st.session_state["revise_version"]
 
-                        st.success(f"✅ Contract {contract_id} v{new_version} saved as Draft!")
-                        st.rerun()
+                    st.success(f"Contract {contract_id} v{new_version} saved as Draft!")
+                    st.rerun()
 
 # ═══════════════════════════════════════════════════════════
-# TAB 3: CUSTOMER REVIEW (simulate customer signing)
+# TAB 3: CUSTOMER REVIEW
 # ═══════════════════════════════════════════════════════════
 with tabs[2]:
     st.markdown("<div class='section-title'>Customer Review Simulation</div>", unsafe_allow_html=True)
     st.markdown("""<div class='info-box'>
-        This simulates what the customer sees after clicking the e-sign link in their email.
-        Select a Pending contract to approve or decline it.
+        This simulates what the customer sees after clicking the link in their email.
+        Select a Pending contract to approve or decline.
     </div>""", unsafe_allow_html=True)
 
-    all_contracts = load_contracts()
+    all_contracts     = load_contracts()
     pending_contracts = [c for c in all_contracts if c["status"] == "Pending"]
 
     if not pending_contracts:
-        st.info("No contracts are currently pending customer signature.")
+        st.info("No contracts pending customer signature. Send a Draft from the Dashboard first.")
     else:
         pending_map = {
             f"{c['contract_id']} v{c['version']} — {c['customer_name']} ({c['equipment_type']} {c['contract_tier']})": c
             for c in pending_contracts
         }
-        selected_label = st.selectbox("Select Pending Contract", list(pending_map.keys()))
+        options        = list(pending_map.keys())
+        selected_label = st.selectbox("Select Pending Contract", options)
         selected_c     = pending_map[selected_label]
 
-        # Load full contract + template to show preview
-        versions = load_contract_versions(selected_c["contract_id"])
+        versions     = load_contract_versions(selected_c["contract_id"])
         this_version = next((v for v in versions if v["version"] == selected_c["version"]), None)
 
         if this_version:
-            customer   = next((c for c in load_customers() if c["customer_id"] == this_version["customer_id"]), {})
-            equip_list = load_equipment(this_version["customer_id"])
-            equip      = next((e for e in equip_list if e["equipment_id"] == this_version["equipment_id"]), {})
-            templates  = load_templates(this_version["equipment_type"], this_version["contract_tier"])
-            template   = templates[0] if templates else {}
+            custs      = load_customers()
+            customer   = next((c for c in custs if c["customer_id"] == this_version["customer_id"]), {})
+            eq_list    = load_equipment(this_version["customer_id"])
+            equip      = next((e for e in eq_list if e["equipment_id"] == this_version["equipment_id"]), {})
+            tmpls      = load_templates(this_version["equipment_type"], this_version["contract_tier"])
+            template   = tmpls[0] if tmpls else {}
 
             if template:
                 filled = fill_template(template.get("template_body", ""), customer, equip, this_version)
                 st.code(filled, language=None)
 
         st.markdown("---")
-        st.markdown(f"**Customer:** {selected_c['customer_name']} &nbsp;|&nbsp; **Contact:** {selected_c['contact_person']} &nbsp;|&nbsp; **Email:** {selected_c['email']}")
+        st.markdown(
+            f"**Customer:** {selected_c['customer_name']} &nbsp;|&nbsp; "
+            f"**Contact:** {selected_c['contact_person']} &nbsp;|&nbsp; "
+            f"**Email:** {selected_c['email']}",
+            unsafe_allow_html=True
+        )
 
-        action = st.radio("Customer Decision", ["✅ Approve & Sign", "❌ Decline with Comments"], horizontal=True)
+        action   = st.radio("Customer Decision", ["Approve and Sign", "Decline with Comments"])
         comments = ""
         if "Decline" in action:
             comments = st.text_area("Customer Comments / Revision Requests",
-                placeholder="e.g. Please revise the contract value. Also change payment terms to half-yearly.")
+                placeholder="e.g. Please revise the contract value. Change payment terms to half-yearly.")
 
         if st.button("Submit Decision", type="primary"):
             if "Approve" in action:
@@ -510,20 +566,20 @@ with tabs[2]:
                 log_action(selected_c["contract_id"], selected_c["version"], "Signed", "Customer",
                     f"Signed by {selected_c['contact_person']}")
                 st.cache_data.clear()
-                st.success(f"✅ Contract {selected_c['contract_id']} v{selected_c['version']} has been signed!")
+                st.success(f"Contract {selected_c['contract_id']} v{selected_c['version']} signed!")
                 st.balloons()
                 st.rerun()
             else:
                 if not comments.strip():
-                    st.error("Please enter customer comments before declining.")
+                    st.error("Please enter comments before declining.")
                 else:
                     supabase.table("contracts").update({
-                        "status":           "Declined",
+                        "status":            "Declined",
                         "customer_comments": comments
                     }).eq("contract_id", selected_c["contract_id"]).eq("version", selected_c["version"]).execute()
                     log_action(selected_c["contract_id"], selected_c["version"], "Declined", "Customer", comments)
                     st.cache_data.clear()
-                    st.warning(f"Contract {selected_c['contract_id']} declined. Go to Dashboard to revise.")
+                    st.warning(f"Contract declined. Go to Dashboard to revise.")
                     st.rerun()
 
 # ═══════════════════════════════════════════════════════════
@@ -539,7 +595,6 @@ with tabs[3]:
         contract_ids = sorted(set(c["contract_id"] for c in all_contracts), reverse=True)
         selected_id  = st.selectbox("Select Contract ID", contract_ids)
 
-        # Show version history
         versions = load_contract_versions(selected_id)
         if versions:
             st.markdown("**Version History**")
@@ -550,12 +605,11 @@ with tabs[3]:
             ]]
             vdf.columns = [
                 "Contract ID", "Version", "Tier", "Equipment",
-                "Value (₹)", "Status", "Changes", "Customer Comments",
+                "Value (Rs)", "Status", "Changes", "Customer Comments",
                 "Sent At", "Signed At", "Created At"
             ]
             st.dataframe(vdf, use_container_width=True, hide_index=True)
 
-        # Show audit log
         audit = load_audit(selected_id)
         if audit:
             st.markdown("**Action Log**")
