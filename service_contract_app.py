@@ -4,6 +4,10 @@ import pandas as pd
 from datetime import date, datetime
 import re
 import smtplib
+import base64
+import time
+import requests
+import jwt as pyjwt
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -193,6 +197,121 @@ Carob Technologies
         return False, str(e)
 
 # ─────────────────────────────────────────────
+# DOCUSIGN INTEGRATION
+# ─────────────────────────────────────────────
+def get_docusign_token():
+    """Get JWT access token from DocuSign"""
+    import jwt as pyjwt
+    import time
+    import requests
+
+    cfg             = st.secrets["docusign"]
+    integration_key = cfg["integration_key"]
+    user_id         = cfg["user_id"]
+    private_key     = cfg["private_key"]
+
+    now = int(time.time())
+    payload = {
+        "iss": integration_key,
+        "sub": user_id,
+        "aud": "account-d.docusign.com",
+        "iat": now,
+        "exp": now + 3600,
+        "scope": "signature impersonation"
+    }
+
+    token = pyjwt.encode(payload, private_key, algorithm="RS256")
+    resp  = requests.post(
+        "https://account-d.docusign.com/oauth/token",
+        data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion":  token
+        }
+    )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
+
+
+def send_to_docusign(customer, contract, contract_body):
+    """Create and send envelope via DocuSign REST API"""
+    try:
+        cfg        = st.secrets["docusign"]
+        account_id = cfg["account_id"]
+        base_uri   = cfg["base_uri"].rstrip("/")
+
+        # Get access token
+        access_token = get_docusign_token()
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type":  "application/json"
+        }
+
+        # Convert contract text to base64 PDF-like document
+        # DocuSign accepts plain text as a .txt document
+        doc_bytes   = contract_body.encode("utf-8")
+        doc_base64  = base64.b64encode(doc_bytes).decode("utf-8")
+
+        doc_name    = f"{contract['contract_id']}_v{contract['version']}_{contract['contract_tier']}_{contract['equipment_type']}.txt"
+        subject     = f"AMC Contract for Signature — {contract['contract_id']} ({contract['contract_tier']} {contract['equipment_type']})"
+
+        envelope_payload = {
+            "emailSubject": subject,
+            "emailBlurb":   f"Dear {customer['contact_person']}, please review and sign your {contract['contract_tier']} AMC contract for {contract['equipment_type']} equipment.",
+            "documents": [
+                {
+                    "documentBase64": doc_base64,
+                    "name":           doc_name,
+                    "fileExtension":  "txt",
+                    "documentId":     "1"
+                }
+            ],
+            "recipients": {
+                "signers": [
+                    {
+                        "email":        customer["email"],
+                        "name":         customer["contact_person"],
+                        "recipientId":  "1",
+                        "routingOrder": "1",
+                        "tabs": {
+                            "signHereTabs": [
+                                {
+                                    "documentId":  "1",
+                                    "pageNumber":  "1",
+                                    "recipientId": "1",
+                                    "tabLabel":    "Signature",
+                                    "xPosition":   "100",
+                                    "yPosition":   "700"
+                                }
+                            ],
+                            "dateSignedTabs": [
+                                {
+                                    "documentId":  "1",
+                                    "pageNumber":  "1",
+                                    "recipientId": "1",
+                                    "tabLabel":    "Date Signed",
+                                    "xPosition":   "300",
+                                    "yPosition":   "700"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            "status": "sent"
+        }
+
+        url  = f"{base_uri}/restapi/v2.1/accounts/{account_id}/envelopes"
+        resp = requests.post(url, json=envelope_payload, headers=headers)
+        resp.raise_for_status()
+
+        envelope_id = resp.json().get("envelopeId")
+        return True, envelope_id
+
+    except Exception as e:
+        return False, str(e)
+
+# ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
 def generate_contract_id():
@@ -373,19 +492,43 @@ with tabs[0]:
 
                             if tmpl and cust:
                                 filled = fill_template(tmpl["template_body"], cust, eq, this_v)
-                                ok, err = send_contract_email(cust, this_v, filled)
-                                if ok:
+
+                                with st.spinner("Sending via DocuSign..."):
+                                    # Send via DocuSign
+                                    ds_ok, ds_result = send_to_docusign(cust, this_v, filled)
+
+                                if ds_ok:
+                                    # Also send notification email with DocuSign envelope info
+                                    send_contract_email(cust, this_v, filled)
+
                                     supabase.table("contracts").update({
-                                        "status":  "Pending",
-                                        "sent_at": datetime.now().isoformat()
+                                        "status":        "Pending",
+                                        "sent_at":       datetime.now().isoformat(),
+                                        "signed_pdf_url": ds_result  # store envelope_id
                                     }).eq("contract_id", c["contract_id"]).eq("version", c["version"]).execute()
-                                    log_action(c["contract_id"], c["version"], "Sent", "Internal",
-                                        f"Email sent to {cust['email']}")
+
+                                    log_action(c["contract_id"], c["version"], "Sent via DocuSign",
+                                        "Internal",
+                                        f"DocuSign envelope {ds_result} sent to {cust['email']}")
                                     st.cache_data.clear()
-                                    st.success(f"Email sent to {cust['email']}!")
+                                    st.success(f"✅ Sent via DocuSign to {cust['email']}! Envelope: {ds_result}")
                                     st.rerun()
                                 else:
-                                    st.error(f"Email failed: {err}")
+                                    # Fallback to plain email if DocuSign fails
+                                    st.warning(f"DocuSign error: {ds_result}. Falling back to email...")
+                                    ok, err = send_contract_email(cust, this_v, filled)
+                                    if ok:
+                                        supabase.table("contracts").update({
+                                            "status":  "Pending",
+                                            "sent_at": datetime.now().isoformat()
+                                        }).eq("contract_id", c["contract_id"]).eq("version", c["version"]).execute()
+                                        log_action(c["contract_id"], c["version"], "Sent via Email",
+                                            "Internal", f"Email sent to {cust['email']}")
+                                        st.cache_data.clear()
+                                        st.success(f"Sent via email to {cust['email']}")
+                                        st.rerun()
+                                    else:
+                                        st.error(f"Email also failed: {err}")
                             else:
                                 st.error("Could not load template or customer data.")
 
