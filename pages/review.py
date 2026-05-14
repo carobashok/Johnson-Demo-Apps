@@ -1,4 +1,3 @@
-
 import streamlit as st
 from supabase import create_client
 from datetime import datetime
@@ -310,6 +309,74 @@ with col2:
                 }).eq("contract_id", contract_id).eq("version", version).execute()
                 log_action(contract_id, version, "Declined", customer.get("contact_person", "Customer"),
                     comments)
+
+                # Send notification email to internal team
+                try:
+                    import smtplib
+                    from email.mime.multipart import MIMEMultipart
+                    from email.mime.text import MIMEText
+
+                    cfg         = st.secrets["email"]
+                    smtp_host   = cfg["smtp_host"]
+                    smtp_port   = int(cfg["smtp_port"])
+                    smtp_user   = cfg["smtp_user"]
+                    smtp_pass   = cfg["smtp_password"]
+                    sender_name = cfg.get("sender_name", "Carob Technologies")
+
+                    msg = MIMEMultipart("alternative")
+                    msg["Subject"] = f"Contract Declined — {contract_id} v{version} — {customer.get('customer_name','')}"
+                    msg["From"]    = f"{sender_name} <{smtp_user}>"
+                    msg["To"]      = smtp_user
+
+                    plain = f"""Contract Declined Notification
+
+Contract ID  : {contract_id} — Version {version}
+Customer     : {customer.get('customer_name','')}
+Contact      : {customer.get('contact_person','')} ({customer.get('email','')})
+Equipment    : {contract.get('equipment_type','')} — {contract.get('contract_tier','')}
+Declined At  : {datetime.now().strftime('%Y-%m-%d %H:%M')}
+
+Customer Comments:
+{comments}
+
+Please revise and resend the contract from the Dashboard.
+"""
+                    html = f"""
+<html><body style="font-family:Arial,sans-serif;color:#222;max-width:600px;margin:auto;">
+<div style="background:#dc3545;padding:20px 28px;border-radius:10px 10px 0 0;">
+    <h2 style="color:#fff;margin:0;">Contract Declined</h2>
+    <p style="color:#ffd0d0;margin:4px 0 0;">Action required — please revise and resend</p>
+</div>
+<div style="border:1px solid #ddd;border-top:none;border-radius:0 0 10px 10px;padding:24px 28px;">
+    <table style="width:100%;border-collapse:collapse;font-size:0.9rem;margin-bottom:20px;">
+        <tr style="background:#f8f9fa;"><td style="padding:10px;font-weight:600;border:1px solid #ddd;width:40%;">Contract ID</td><td style="padding:10px;border:1px solid #ddd;">{contract_id} — v{version}</td></tr>
+        <tr><td style="padding:10px;font-weight:600;border:1px solid #ddd;">Customer</td><td style="padding:10px;border:1px solid #ddd;">{customer.get('customer_name','')}</td></tr>
+        <tr style="background:#f8f9fa;"><td style="padding:10px;font-weight:600;border:1px solid #ddd;">Contact</td><td style="padding:10px;border:1px solid #ddd;">{customer.get('contact_person','')} ({customer.get('email','')})</td></tr>
+        <tr><td style="padding:10px;font-weight:600;border:1px solid #ddd;">Equipment</td><td style="padding:10px;border:1px solid #ddd;">{contract.get('equipment_type','')} — {contract.get('contract_tier','')}</td></tr>
+        <tr style="background:#f8f9fa;"><td style="padding:10px;font-weight:600;border:1px solid #ddd;">Declined At</td><td style="padding:10px;border:1px solid #ddd;">{datetime.now().strftime('%Y-%m-%d %H:%M')}</td></tr>
+    </table>
+    <h3 style="color:#dc3545;">Customer Comments:</h3>
+    <div style="background:#fff5f5;border-left:4px solid #dc3545;padding:14px;border-radius:0 6px 6px 0;font-size:0.95rem;">
+        {comments}
+    </div>
+    <p style="margin-top:20px;font-size:0.88rem;color:#555;">
+        Please log in to the Service Contract Manager, revise the contract, and resend.
+    </p>
+</div>
+</body></html>
+"""
+                    msg.attach(MIMEText(plain, "plain"))
+                    msg.attach(MIMEText(html,  "html"))
+
+                    with smtplib.SMTP(smtp_host, smtp_port) as server:
+                        server.ehlo()
+                        server.starttls()
+                        server.login(smtp_user, smtp_pass)
+                        server.sendmail(smtp_user, smtp_user, msg.as_string())
+
+                except Exception:
+                    pass  # Don't block the decline flow if email fails
+
                 st.session_state["decision_submitted"] = True
                 st.warning("Your decline has been recorded. Carob Technologies will send a revised contract shortly.")
                 st.rerun()
