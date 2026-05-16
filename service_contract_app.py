@@ -522,20 +522,16 @@ with tabs[0]:
                                     ds_ok, ds_result = send_to_docusign(cust, this_v, filled)
 
                                 if ds_ok:
-                                    # Also send notification email with DocuSign envelope info
-                                    send_contract_email(cust, this_v, filled)
-
+                                    st.success(f"✅ Sent via DocuSign! Envelope: {ds_result}")
                                     supabase.table("contracts").update({
                                         "status":        "Pending",
                                         "sent_at":       datetime.now().isoformat(),
-                                        "signed_pdf_url": ds_result  # store envelope_id
+                                        "signed_pdf_url": ds_result
                                     }).eq("contract_id", c["contract_id"]).eq("version", c["version"]).execute()
-
                                     log_action(c["contract_id"], c["version"], "Sent via DocuSign",
                                         "Internal",
                                         f"DocuSign envelope {ds_result} sent to {cust['email']}")
                                     st.cache_data.clear()
-                                    st.success(f"✅ Sent via DocuSign to {cust['email']}! Envelope: {ds_result}")
                                     st.rerun()
                                 else:
                                     # Fallback to plain email if DocuSign fails
