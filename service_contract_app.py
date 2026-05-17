@@ -508,7 +508,8 @@ with tabs[0]:
                     # Show comments for Declined and Cancelled
                     if c["status"] in ["Declined", "Cancelled"] and c.get("customer_comments"):
                         comments = str(c.get("customer_comments", ""))
-                        st.caption(f"Note: {comments[:80]}{'...' if len(comments) > 80 else ''}"), 2, 1.5, 1.5, 1.2])
+                        short    = comments[:80] + "..." if len(comments) > 80 else comments
+                        st.caption("Note: " + short), 2, 1.5, 1.5, 1.2])
                 with col1:
                     st.markdown(f"**{c['contract_id']}** &nbsp; v{c['version']}", unsafe_allow_html=True)
                     st.caption(f"{c['customer_name']} — {c['contact_person']}")
