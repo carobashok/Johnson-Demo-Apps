@@ -43,10 +43,11 @@ h1, h2, h3 { font-family: 'DM Serif Display', serif; }
 .app-header span { color: #a8d8ea; font-size: 0.85rem; }
 
 .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.5px; }
-.badge-draft    { background: #e8e8e8; color: #555; }
-.badge-pending  { background: #fff3cd; color: #856404; }
-.badge-signed   { background: #d4edda; color: #155724; }
-.badge-declined { background: #f8d7da; color: #721c24; }
+.badge-draft     { background: #e8e8e8; color: #555; }
+.badge-pending   { background: #fff3cd; color: #856404; }
+.badge-signed    { background: #d4edda; color: #155724; }
+.badge-declined  { background: #f8d7da; color: #721c24; }
+.badge-cancelled { background: #e2e3e5; color: #383d41; }
 
 .tier-platinum { background: #e8e0f7; color: #4a1e8a; border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; font-weight: 600; }
 .tier-gold     { background: #fff4d6; color: #92650a; border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; font-weight: 600; }
@@ -450,24 +451,26 @@ tabs = st.tabs(["Dashboard", "New Contract", "Customer Review", "Audit Trail"])
 with tabs[0]:
     contracts = load_contracts()
 
-    total    = len(set(c["contract_id"] for c in contracts))
-    pending  = sum(1 for c in contracts if c["status"] == "Pending")
-    signed   = sum(1 for c in contracts if c["status"] == "Signed")
-    declined = sum(1 for c in contracts if c["status"] == "Declined")
-    draft    = sum(1 for c in contracts if c["status"] == "Draft")
+    total     = len(set(c["contract_id"] for c in contracts))
+    pending   = sum(1 for c in contracts if c["status"] == "Pending")
+    signed    = sum(1 for c in contracts if c["status"] == "Signed")
+    declined  = sum(1 for c in contracts if c["status"] == "Declined")
+    draft     = sum(1 for c in contracts if c["status"] == "Draft")
+    cancelled = sum(1 for c in contracts if c["status"] == "Cancelled")
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Total Contracts", total)
-    c2.metric("Draft",    draft)
-    c3.metric("Pending",  pending)
-    c4.metric("Signed",   signed)
-    c5.metric("Declined", declined)
+    c2.metric("Draft",     draft)
+    c3.metric("Pending",   pending)
+    c4.metric("Signed",    signed)
+    c5.metric("Declined",  declined)
+    c6.metric("Cancelled", cancelled)
 
     st.markdown("<div class='section-title'>All Contracts</div>", unsafe_allow_html=True)
 
     f1, f2, f3 = st.columns(3)
     with f1:
-        status_filter = st.selectbox("Filter by Status", ["All", "Draft", "Pending", "Signed", "Declined"])
+        status_filter = st.selectbox("Filter by Status", ["All", "Draft", "Pending", "Signed", "Declined", "Cancelled"])
     with f2:
         type_filter = st.selectbox("Equipment Type", ["All", "Lift", "Escalator"])
     with f3:
