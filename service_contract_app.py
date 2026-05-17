@@ -509,16 +509,7 @@ with tabs[0]:
                     if c["status"] in ["Declined", "Cancelled"] and c.get("customer_comments"):
                         comments = str(c.get("customer_comments", ""))
                         short    = comments[:80] + "..." if len(comments) > 80 else comments
-                        st.caption("Note: " + short), 2, 1.5, 1.5, 1.2])
-                with col1:
-                    st.markdown(f"**{c['contract_id']}** &nbsp; v{c['version']}", unsafe_allow_html=True)
-                    st.caption(f"{c['customer_name']} — {c['contact_person']}")
-                with col2:
-                    st.markdown(f"{c['equipment_type']} &nbsp; {tier_html(c['contract_tier'])}", unsafe_allow_html=True)
-                    st.caption(str(c.get("equipment", "")))
-                with col3:
-                    st.markdown(f"Rs {float(c['contract_value']):,.0f}", unsafe_allow_html=True)
-                    st.caption(f"{c['start_date']} to {c['end_date']}")
+                        st.caption("Note: " + short)
                 with col4:
                     st.markdown(badge_html(c["status"]), unsafe_allow_html=True)
                     if c.get("signed_at"):
