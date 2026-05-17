@@ -443,7 +443,7 @@ st.markdown("""
 # ─────────────────────────────────────────────
 # NAVIGATION
 # ─────────────────────────────────────────────
-tabs = st.tabs(["Dashboard", "New Contract", "Customer Review", "Audit Trail"])
+tabs = st.tabs(["Dashboard", "New Contract", "Customer Review", "Audit Trail", "Analytics"])
 
 # ═══════════════════════════════════════════════════════════
 # TAB 1: DASHBOARD
@@ -910,3 +910,172 @@ with tabs[3]:
             st.dataframe(adf, use_container_width=True, hide_index=True)
         else:
             st.info("No audit entries yet for this contract.")
+
+# ═══════════════════════════════════════════════════════════
+# TAB 5: ANALYTICS
+# ═══════════════════════════════════════════════════════════
+with tabs[4]:
+    st.markdown("<div class='section-title'>Contract Analytics</div>", unsafe_allow_html=True)
+
+    # ── Load data ────────────────────────────────────────
+    # Latest version per contract for status counts
+    latest_res = supabase.table("contracts_latest").select(
+        "contract_id, status, contract_tier, equipment_type, contract_value, start_date, end_date, signed_at, sent_at"
+    ).execute()
+    latest_data = latest_res.data or []
+
+    # Version 1 only for monthly trend (contract initiation date)
+    trend_res = supabase.table("contracts").select(
+        "contract_id, status, contract_value, contract_tier, equipment_type, created_at"
+    ).eq("version", 1).execute()
+    trend_data = trend_res.data or []
+
+    if not latest_data:
+        st.info("No contract data available for analytics yet.")
+    else:
+        df_latest = pd.DataFrame(latest_data)
+        df_trend  = pd.DataFrame(trend_data)
+
+        # ── Revenue classification ────────────────────────
+        def revenue_class(status):
+            if status == "Signed":    return "Confirmed Revenue"
+            if status in ["Pending", "Cancelled"]: return "Active Pipeline"
+            if status == "Declined":  return "At Risk"
+            return "Preparation"
+
+        df_latest["revenue_class"]   = df_latest["status"].apply(revenue_class)
+        df_latest["contract_value"]  = pd.to_numeric(df_latest["contract_value"], errors="coerce")
+
+        # ── KPI Row ───────────────────────────────────────
+        total_contracts  = len(df_latest)
+        confirmed_value  = df_latest[df_latest["status"] == "Signed"]["contract_value"].sum()
+        pipeline_value   = df_latest[df_latest["status"].isin(["Pending", "Cancelled"])]["contract_value"].sum()
+        at_risk_value    = df_latest[df_latest["status"] == "Declined"]["contract_value"].sum()
+        signing_rate     = round(len(df_latest[df_latest["status"] == "Signed"]) / total_contracts * 100, 1) if total_contracts else 0
+
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Total Contracts",    total_contracts)
+        k2.metric("Confirmed Revenue",  f"Rs {confirmed_value:,.0f}")
+        k3.metric("Active Pipeline",    f"Rs {pipeline_value:,.0f}")
+        k4.metric("At Risk",            f"Rs {at_risk_value:,.0f}")
+        k5.metric("Signing Rate",       f"{signing_rate}%")
+
+        st.markdown("---")
+
+        # ── Row 1: Status breakdown + Tier breakdown ──────
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            st.markdown("**Contracts by Status** (latest version per contract)")
+            status_counts = df_latest["status"].value_counts().reset_index()
+            status_counts.columns = ["Status", "Count"]
+            status_colors = {
+                "Signed":    "#10B981",
+                "Pending":   "#F59E0B",
+                "Declined":  "#EF4444",
+                "Cancelled": "#6B7280",
+                "Draft":     "#94A3B8",
+            }
+            try:
+                import plotly.express as px
+                fig1 = px.pie(
+                    status_counts, values="Count", names="Status",
+                    color="Status",
+                    color_discrete_map=status_colors,
+                    hole=0.45
+                )
+                fig1.update_traces(textposition="inside", textinfo="percent+label")
+                fig1.update_layout(showlegend=True, margin=dict(t=20, b=20, l=0, r=0), height=300)
+                st.plotly_chart(fig1, use_container_width=True)
+            except:
+                st.dataframe(status_counts, hide_index=True)
+
+        with col_b:
+            st.markdown("**Contract Value by Tier**")
+            tier_value = df_latest.groupby("contract_tier")["contract_value"].sum().reset_index()
+            tier_value.columns = ["Tier", "Total Value (Rs)"]
+            tier_colors = {"Platinum": "#7C3AED", "Gold": "#F59E0B", "Silver": "#64748B"}
+            try:
+                fig2 = px.bar(
+                    tier_value, x="Tier", y="Total Value (Rs)",
+                    color="Tier",
+                    color_discrete_map=tier_colors,
+                    text_auto=True
+                )
+                fig2.update_layout(showlegend=False, margin=dict(t=20, b=20, l=0, r=0), height=300)
+                fig2.update_traces(texttemplate="Rs %{y:,.0f}", textposition="outside")
+                st.plotly_chart(fig2, use_container_width=True)
+            except:
+                st.dataframe(tier_value, hide_index=True)
+
+        # ── Row 2: Equipment type + Revenue classification ─
+        col_c, col_d = st.columns(2)
+
+        with col_c:
+            st.markdown("**Lift vs Escalator**")
+            equip_counts = df_latest.groupby(["equipment_type", "status"]).size().reset_index()
+            equip_counts.columns = ["Equipment Type", "Status", "Count"]
+            try:
+                fig3 = px.bar(
+                    equip_counts, x="Equipment Type", y="Count",
+                    color="Status", color_discrete_map=status_colors,
+                    barmode="stack", text_auto=True
+                )
+                fig3.update_layout(margin=dict(t=20, b=20, l=0, r=0), height=300)
+                st.plotly_chart(fig3, use_container_width=True)
+            except:
+                st.dataframe(equip_counts, hide_index=True)
+
+        with col_d:
+            st.markdown("**Revenue Classification**")
+            rev_summary = df_latest.groupby("revenue_class")["contract_value"].sum().reset_index()
+            rev_summary.columns = ["Classification", "Value (Rs)"]
+            rev_colors = {
+                "Confirmed Revenue": "#10B981",
+                "Active Pipeline":   "#F59E0B",
+                "At Risk":           "#EF4444",
+                "Preparation":       "#94A3B8",
+            }
+            try:
+                fig4 = px.bar(
+                    rev_summary, x="Classification", y="Value (Rs)",
+                    color="Classification",
+                    color_discrete_map=rev_colors,
+                    text_auto=True
+                )
+                fig4.update_layout(showlegend=False, margin=dict(t=20, b=20, l=0, r=0), height=300)
+                fig4.update_traces(texttemplate="Rs %{y:,.0f}", textposition="outside")
+                st.plotly_chart(fig4, use_container_width=True)
+            except:
+                st.dataframe(rev_summary, hide_index=True)
+
+        # ── Row 3: Monthly trend ──────────────────────────
+        st.markdown("**Monthly Contract Trend** (by initiation date — v1 only, revisions excluded)")
+
+        if not df_trend.empty:
+            df_trend["month"] = pd.to_datetime(df_trend["created_at"]).dt.strftime("%Y-%m")
+            df_trend["contract_value"] = pd.to_numeric(df_trend["contract_value"], errors="coerce")
+
+            monthly = df_trend.groupby(["month", "status"]).size().reset_index()
+            monthly.columns = ["Month", "Status", "Count"]
+
+            try:
+                fig5 = px.bar(
+                    monthly, x="Month", y="Count",
+                    color="Status", color_discrete_map=status_colors,
+                    barmode="group", text_auto=True
+                )
+                fig5.update_layout(margin=dict(t=20, b=20, l=0, r=0), height=320)
+                st.plotly_chart(fig5, use_container_width=True)
+            except:
+                st.dataframe(monthly, hide_index=True)
+
+        # ── Row 4: Customer summary table ─────────────────
+        st.markdown("**Contract Summary by Customer**")
+        cust_summary = df_latest.groupby("status").agg(
+            Count=("contract_id", "count"),
+            Total_Value=("contract_value", "sum")
+        ).reset_index()
+        cust_summary.columns = ["Status", "Count", "Total Value (Rs)"]
+        cust_summary["Total Value (Rs)"] = cust_summary["Total Value (Rs)"].apply(lambda x: f"Rs {x:,.0f}")
+        st.dataframe(cust_summary, use_container_width=True, hide_index=True)
