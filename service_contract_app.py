@@ -489,7 +489,25 @@ with tabs[0]:
     else:
         for c in filtered:
             with st.container():
-                col1, col2, col3, col4, col5 = st.columns([2, 2, 1.5, 1.5, 1.2])
+                col1, col2, col3, col4, col5 = st.columns([2, 2, 1.5, 1.8, 1.2])
+                with col1:
+                    st.markdown(f"**{c['contract_id']}** &nbsp; v{c['version']}", unsafe_allow_html=True)
+                    st.caption(f"{c['customer_name']} — {c['contact_person']}")
+                with col2:
+                    st.markdown(f"{c['equipment_type']} &nbsp; {tier_html(c['contract_tier'])}", unsafe_allow_html=True)
+                    st.caption(str(c.get("equipment", "")))
+                with col3:
+                    st.markdown(f"Rs {float(c['contract_value']):,.0f}", unsafe_allow_html=True)
+                    st.caption(f"{c['start_date']} to {c['end_date']}")
+                with col4:
+                    st.markdown(badge_html(c["status"]), unsafe_allow_html=True)
+                    if c.get("signed_at"):
+                        st.caption(f"Signed: {str(c['signed_at'])[:10]}")
+                    elif c.get("sent_at"):
+                        st.caption(f"Sent: {str(c['sent_at'])[:10]}")
+                    # Show comments for Declined and Cancelled
+                    if c["status"] in ["Declined", "Cancelled"] and c.get("customer_comments"):
+                        st.caption(f"📝 {c['customer_comments'][:80]}{'...' if len(str(c.get('customer_comments',''))) > 80 else ''}"), 2, 1.5, 1.5, 1.2])
                 with col1:
                     st.markdown(f"**{c['contract_id']}** &nbsp; v{c['version']}", unsafe_allow_html=True)
                     st.caption(f"{c['customer_name']} — {c['contact_person']}")
