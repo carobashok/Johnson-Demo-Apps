@@ -531,6 +531,8 @@ with tabs[0]:
                                     log_action(c["contract_id"], c["version"], "Sent via DocuSign",
                                         "Internal",
                                         f"DocuSign envelope {ds_result} sent to {cust['email']}")
+                                    # Send internal notification to team
+                                    send_contract_email(cust, this_v, filled)
                                     st.cache_data.clear()
                                     st.rerun()
                                 else:
@@ -631,41 +633,95 @@ with tabs[1]:
                 st.markdown("<div class='section-title'>Contract Preview</div>", unsafe_allow_html=True)
                 st.code(filled, language=None)
 
-                if st.button("Save as Draft"):
-                    if is_revision:
-                        prev_vers   = load_contract_versions(st.session_state["revise_contract_id"])
-                        new_version = max(v["version"] for v in prev_vers) + 1
-                        contract_id = st.session_state["revise_contract_id"]
-                    else:
-                        contract_id = generate_contract_id()
-                        new_version = 1
+                # ── Duplicate check (show before button) ─────────────────
+                block_save   = False
+                warning_msg  = None
 
-                    supabase.table("contracts").insert({
-                        "contract_id":    contract_id,
-                        "version":        new_version,
-                        "customer_id":    sel_customer["customer_id"],
-                        "equipment_id":   sel_equip["equipment_id"],
-                        "template_id":    template["template_id"],
-                        "equipment_type": sel_equip["equipment_type"],
-                        "contract_tier":  contract_tier,
-                        "contract_value": contract_value,
-                        "start_date":     str(start_date),
-                        "end_date":       str(end_date),
-                        "payment_terms":  payment_terms,
-                        "status":         "Draft",
-                        "changed_fields": changed_fields,
-                    }).execute()
+                if not is_revision:
+                    # Check for Signed contracts with overlapping dates
+                    signed_existing = supabase.table("contracts").select(
+                        "contract_id, version, contract_tier, start_date, end_date"
+                    ).eq("customer_id",  sel_customer["customer_id"])\
+                     .eq("equipment_id", sel_equip["equipment_id"])\
+                     .eq("status",       "Signed")\
+                     .execute()
 
-                    log_action(contract_id, new_version, "Created", "Internal",
-                        f"Draft — {sel_equip['equipment_type']} {contract_tier}")
-                    st.cache_data.clear()
+                    for sc in (signed_existing.data or []):
+                        sc_start = sc["start_date"]
+                        sc_end   = sc["end_date"]
+                        # Check date overlap
+                        if str(start_date) <= sc_end and str(end_date) >= sc_start:
+                            block_save  = True
+                            warning_msg = (
+                                f"⛔ Cannot create contract — a **Signed** {sc['contract_tier']} AMC "
+                                f"({sc['contract_id']}) already covers this equipment "
+                                f"from **{sc_start}** to **{sc_end}**. "
+                                f"An active AMC contract exists for this period."
+                            )
+                            break
 
-                    if is_revision:
-                        del st.session_state["revise_contract_id"]
-                        del st.session_state["revise_version"]
+                    if not block_save:
+                        # Check for Draft or Pending contracts
+                        active_existing = supabase.table("contracts").select(
+                            "contract_id, version, contract_tier, status"
+                        ).eq("customer_id",  sel_customer["customer_id"])\
+                         .eq("equipment_id", sel_equip["equipment_id"])\
+                         .in_("status",      ["Draft", "Pending"])\
+                         .execute()
 
-                    st.success(f"Contract {contract_id} v{new_version} saved as Draft!")
-                    st.rerun()
+                        if active_existing.data:
+                            active_list = ", ".join([
+                                f"{c['contract_id']} ({c['contract_tier']} — {c['status']})"
+                                for c in active_existing.data
+                            ])
+                            warning_msg = (
+                                f"ℹ️ Note: An active contract already exists for this equipment — "
+                                f"**{active_list}**. You can still save this new contract."
+                            )
+
+                # Show warning if any
+                if block_save and warning_msg:
+                    st.error(warning_msg)
+                elif warning_msg:
+                    st.info(warning_msg)
+
+                # Show Save button only if not blocked
+                if not block_save:
+                    if st.button("Save as Draft"):
+                        if is_revision:
+                            prev_vers   = load_contract_versions(st.session_state["revise_contract_id"])
+                            new_version = max(v["version"] for v in prev_vers) + 1
+                            contract_id = st.session_state["revise_contract_id"]
+                        else:
+                            contract_id = generate_contract_id()
+                            new_version = 1
+
+                        supabase.table("contracts").insert({
+                            "contract_id":    contract_id,
+                            "version":        new_version,
+                            "customer_id":    sel_customer["customer_id"],
+                            "equipment_id":   sel_equip["equipment_id"],
+                            "template_id":    template["template_id"],
+                            "equipment_type": sel_equip["equipment_type"],
+                            "contract_tier":  contract_tier,
+                            "contract_value": contract_value,
+                            "start_date":     str(start_date),
+                            "end_date":       str(end_date),
+                            "payment_terms":  payment_terms,
+                            "status":         "Draft",
+                            "changed_fields": changed_fields,
+                        }).execute()
+
+                        log_action(contract_id, new_version, "Created", "Internal",
+                            f"Draft — {sel_equip['equipment_type']} {contract_tier}")
+                        st.cache_data.clear()
+
+                        if is_revision:
+                            del st.session_state["revise_contract_id"]
+                            del st.session_state["revise_version"]
+
+                        st.success(f"Contract {contract_id} v{new_version} saved as Draft!")
+                        st.rerun()
 
 # ═══════════════════════════════════════════════════════════
 # TAB 3: CUSTOMER REVIEW
