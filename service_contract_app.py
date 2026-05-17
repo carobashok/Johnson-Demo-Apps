@@ -510,12 +510,6 @@ with tabs[0]:
                         comments = str(c.get("customer_comments", ""))
                         short    = comments[:80] + "..." if len(comments) > 80 else comments
                         st.caption("Note: " + short)
-                with col4:
-                    st.markdown(badge_html(c["status"]), unsafe_allow_html=True)
-                    if c.get("signed_at"):
-                        st.caption(f"Signed: {str(c['signed_at'])[:10]}")
-                    elif c.get("sent_at"):
-                        st.caption(f"Sent: {str(c['sent_at'])[:10]}")
                 with col5:
                     if c["status"] == "Draft":
                         if st.button("Send Email", key=f"send_{c['contract_id']}_{c['version']}"):
